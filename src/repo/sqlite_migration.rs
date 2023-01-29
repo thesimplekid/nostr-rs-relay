@@ -20,7 +20,7 @@ pragma mmap_size = 17179869184; -- cap mmap at 16GB
 "##;
 
 /// Latest database version
-pub const DB_VERSION: usize = 15;
+pub const DB_VERSION: usize = 16;
 
 /// Schema definition
 const INIT_SQL: &str = formatcp!(
@@ -44,6 +44,7 @@ author BLOB NOT NULL, -- author pubkey
 delegated_by BLOB, -- delegator pubkey (NIP-26)
 kind INTEGER NOT NULL, -- event kind
 hidden INTEGER, -- relevant for queries
+expiration INTEGER, -- timestamp of expiration
 content TEXT NOT NULL -- serialized json of event object
 );
 
@@ -58,6 +59,7 @@ CREATE INDEX IF NOT EXISTS kind_author_index ON event(kind,author);
 CREATE INDEX IF NOT EXISTS kind_created_at_index ON event(kind,created_at);
 CREATE INDEX IF NOT EXISTS author_created_at_index ON event(author,created_at);
 CREATE INDEX IF NOT EXISTS author_kind_index ON event(author,kind);
+CREATE INDEX IF NOT EXISTS expiration_index ON event(expiration);
 
 -- Tag Table
 -- Tag values are stored as either a BLOB (if they come in as a
@@ -198,6 +200,9 @@ pub fn upgrade_db(conn: &mut PooledConnection) -> Result<usize> {
             }
             if curr_version == 14 {
                 curr_version = mig_14_to_15(conn)?;
+            }
+            if curr_version == 15 {
+                curr_version = mig_15_to_16(conn)?;
             }
 
             if curr_version == DB_VERSION {
@@ -643,11 +648,30 @@ PRAGMA user_version = 15;
     match conn.execute_batch(clear_hidden_sql) {
         Ok(()) => {
             info!("all hidden events removed");
-        },
+        }
         Err(err) => {
             error!("delete failed: {}", err);
             panic!("could not remove hidden events");
         }
     }
     Ok(15)
+}
+
+fn mig_15_to_16(conn: &mut PooledConnection) -> Result<usize> {
+    info!("database schema needs update from 15 ->16");
+    let upgrade_sql = r##"
+ALTER TABLE event ADD expiration INTEGER;
+CREATE INDEX IF NOT EXISTS expiration ON event(expiration);
+PRAGMA user_version = 16;
+"##;
+    match conn.execute_batch(upgrade_sql) {
+        Ok(()) => {
+            info!("database schema upgraded v15 -> v16");
+        }
+        Err(err) => {
+            error!("update failed: {}", err);
+            panic!("database could not be upgraded");
+        }
+    }
+    Ok(16)
 }

@@ -157,6 +157,32 @@ impl Event {
         }
     }
 
+    /// Should this event expire
+    #[must_use]
+    pub fn expiration(&self) -> Option<u64> {
+        let expiration = self
+            .tags
+            .iter()
+            .find(|inner_vec| inner_vec[0] == "expiration")
+            .map(|inner_vec| &inner_vec[1]);
+
+        expiration.and_then(|expiration| expiration.parse::<u64>().ok())
+    }
+
+    /// Is this event currently expired
+    #[must_use]
+    pub fn is_expired(&self) -> bool {
+        let expiration = self.expiration();
+
+        if let Some(ex) = expiration {
+            if ex < unix_time() {
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// Pull a NIP-05 Name out of the event, if one exists
     #[must_use] pub fn get_nip05_addr(&self) -> Option<nip05::Nip05Name> {
         if self.is_kind_metadata() {
@@ -654,4 +680,28 @@ mod tests {
         assert_eq!(event.distinct_param(), Some("".to_string()));
     }
 
+    #[test]
+    fn expired_event() {
+        let mut event = Event::simple_event();
+        event.tags = vec![vec![
+            "expiration".to_owned(),
+            (unix_time() - 100).to_string(),
+        ]];
+        assert_eq!(event.is_expired(), true);
+
+        event.tags = vec![vec![
+            "expiration".to_owned(),
+            (unix_time() + 100).to_string(),
+        ]];
+        assert_eq!(event.is_expired(), false);
+    }
+
+    #[test]
+    fn expiration_time() {
+        let mut event = Event::simple_event();
+        let expiration_time = unix_time();
+        event.tags = vec![vec!["expiration".to_owned(), expiration_time.to_string()]];
+
+        assert_eq!(event.expiration().unwrap(), expiration_time);
+    }
 }

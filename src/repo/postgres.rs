@@ -15,10 +15,10 @@ use sqlx::Error::RowNotFound;
 use crate::hexrange::{hex_range, HexSearch};
 use crate::repo::postgres_migration::run_migrations;
 use crate::server::NostrMetrics;
-use crate::utils::{is_hex, is_lower_hex};
+use crate::utils::{is_hex, is_lower_hex, unix_time};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
-use tracing::log::trace;
+use tracing::log::{trace, warn};
 use tracing::{debug, error, info};
 use crate::error;
 
@@ -40,10 +40,8 @@ impl PostgresRepo {
 
 #[async_trait]
 impl NostrRepo for PostgresRepo {
-
     async fn start(&self) -> Result<()> {
-	info!("not implemented");
-	Ok(())
+        db_checkpoint_task(self.conn.clone(), Duration::from_secs(60)).await
     }
 
     async fn migrate_up(&self) -> Result<usize> {
@@ -61,6 +59,21 @@ impl NostrRepo for PostgresRepo {
         let delegator_blob: Option<Vec<u8>> =
             e.delegated_by.as_ref().and_then(|d| hex::decode(d).ok());
         let event_str = serde_json::to_string(&e).unwrap();
+        
+        // Get the expiration time of the even if there is one
+        // cast from u64 to i64
+        let expiry = e.expiration().and_then(|ex| {
+            if ex >= unix_time() {
+                Some(Utc.timestamp_opt(ex as i64, 0).unwrap())
+            } else {
+                None
+            }
+        });
+
+        // No need to persist the event if already expired
+        if expiry.is_none() {
+            return Ok(0);
+        }
 
         // determine if this event would be shadowed by an existing
         // replaceable event or parameterized replaceable event.
@@ -107,8 +120,8 @@ impl NostrRepo for PostgresRepo {
         // ignore if the event hash is a duplicate.
         let mut ins_count = sqlx::query(
             r#"INSERT INTO "event"
-(id, pub_key, created_at, kind, "content", delegated_by)
-VALUES($1, $2, $3, $4, $5, $6)
+(id, pub_key, created_at, kind, "content", delegated_by, expiration)
+VALUES($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (id) DO NOTHING"#,
         )
             .bind(&id_blob)
@@ -117,6 +130,7 @@ ON CONFLICT (id) DO NOTHING"#,
             .bind(e.kind as i64)
             .bind(event_str.into_bytes())
             .bind(delegator_blob)
+            .bind(expiry)
             .execute(&mut tx)
             .await?
             .rows_affected();
@@ -501,6 +515,34 @@ ON CONFLICT (id) DO NOTHING"#,
             .await?
             .ok_or(error::Error::SqlxError(RowNotFound))
     }
+}
+
+pub async fn db_checkpoint_task(pool: PostgresPool, frequency: Duration) -> Result<()> {
+    debug!("Checkpoint");
+    tokio::task::spawn(async move {
+        loop {
+            tokio::select! {
+            _ = tokio::time::sleep(frequency) => {
+                if let Err(err) = delete_expired_events(&pool).await {
+                    warn!("Could not delete expired events: {:?}", err);
+                } 
+            }
+        }
+    }
+    });
+
+    Ok(())
+}
+    
+async fn delete_expired_events(conn: &PostgresPool) -> Result<()> {
+    let time_now = Utc::now();
+    let query = "DELETE FROM event WHERE expiration < $1;";
+
+    sqlx::query(query)
+            .bind(time_now)
+            .execute(conn)
+            .await?;
+    Ok(())
 }
 
 /// Create a dynamic SQL query and params from a subscription filter.

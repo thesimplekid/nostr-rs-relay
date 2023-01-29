@@ -66,6 +66,7 @@ async fn build_postgres_pool(settings: &Settings, metrics: NostrMetrics) -> Post
     // Panic on migration failure
     let version = repo.migrate_up().await.unwrap();
     info!("Postgres migration completed, at v{}", version);
+    repo.start().await.ok();
     repo
 }
 
@@ -210,39 +211,42 @@ pub async fn db_writer(
         }
         // TODO: cache recent list of authors to remove a DB call.
         let start = Instant::now();
-        if event.is_ephemeral() {
-            bcast_tx.send(event.clone()).ok();
-            debug!(
-                "published ephemeral event: {:?} from: {:?} in: {:?}",
-                event.get_event_id_prefix(),
-                event.get_author_prefix(),
-                start.elapsed()
-            );
-            event_write = true;
-        } else {
-            match repo.write_event(&event).await {
-                Ok(updated) => {
-                    if updated == 0 {
-                        trace!("ignoring duplicate or deleted event");
-                        notice_tx.try_send(Notice::duplicate(event.id)).ok();
-                    } else {
-                        info!(
-                            "persisted event: {:?} (kind: {}) from: {:?} in: {:?}",
-                            event.get_event_id_prefix(),
-                            event.kind,
-                            event.get_author_prefix(),
-                            start.elapsed()
-                        );
-                        event_write = true;
-                        // send this out to all clients
-                        bcast_tx.send(event.clone()).ok();
-                        notice_tx.try_send(Notice::saved(event.id)).ok();
+
+        if !event.is_expired() {
+            if event.is_ephemeral() {
+                bcast_tx.send(event.clone()).ok();
+                debug!(
+                    "published ephemeral event: {:?} from: {:?} in: {:?}",
+                    event.get_event_id_prefix(),
+                    event.get_author_prefix(),
+                    start.elapsed()
+                );
+                event_write = true;
+            } else {
+                match repo.write_event(&event).await {
+                    Ok(updated) => {
+                        if updated == 0 {
+                            trace!("ignoring duplicate or deleted event");
+                            notice_tx.try_send(Notice::duplicate(event.id)).ok();
+                        } else {
+                            info!(
+                                "persisted event: {:?} (kind: {}) from: {:?} in: {:?}",
+                                event.get_event_id_prefix(),
+                                event.kind,
+                                event.get_author_prefix(),
+                                start.elapsed()
+                            );
+                            event_write = true;
+                            // send this out to all clients
+                            bcast_tx.send(event.clone()).ok();
+                            notice_tx.try_send(Notice::saved(event.id)).ok();
+                        }
                     }
-                }
-                Err(err) => {
-                    warn!("event insert failed: {:?}", err);
-                    let msg = "relay experienced an error trying to publish the latest event";
-                    notice_tx.try_send(Notice::error(event.id, msg)).ok();
+                    Err(err) => {
+                        warn!("event insert failed: {:?}", err);
+                        let msg = "relay experienced an error trying to publish the latest event";
+                        notice_tx.try_send(Notice::error(event.id, msg)).ok();
+                    }
                 }
             }
         }

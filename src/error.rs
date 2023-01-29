@@ -1,5 +1,5 @@
 //! Error handling
-use std::result;
+use std::{num::ParseIntError, result};
 use thiserror::Error;
 use tungstenite::error::Error as WsError;
 
@@ -128,5 +128,12 @@ impl From<config::ConfigError> for Error {
     /// Wrap Config error
     fn from(r: config::ConfigError) -> Self {
         Error::ConfigError(r)
+    }
+}
+
+impl From<ParseIntError> for Error {
+    // Wrap parse int error
+    fn from(_r: ParseIntError) -> Self {
+        Error::CustomError("Could not parse int".to_string())
     }
 }

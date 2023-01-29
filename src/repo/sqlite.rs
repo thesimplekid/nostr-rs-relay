@@ -6,7 +6,7 @@ use crate::event::{single_char_tagname, Event};
 use crate::hexrange::hex_range;
 use crate::hexrange::HexSearch;
 use crate::repo::sqlite_migration::{STARTUP_SQL,upgrade_db};
-use crate::utils::{is_hex, is_lower_hex};
+use crate::utils::{is_hex, is_lower_hex, unix_time};
 use crate::nip05::{Nip05Name, VerificationRecord};
 use crate::subscription::{ReqFilter, Subscription};
 use crate::server::NostrMetrics;
@@ -54,7 +54,8 @@ pub struct SqliteRepo {
 
 impl SqliteRepo {
     // build all the pools needed
-    #[must_use] pub fn new(settings: &Settings, metrics: NostrMetrics) -> SqliteRepo {
+    #[must_use]
+    pub fn new(settings: &Settings, metrics: NostrMetrics) -> SqliteRepo {
         let write_pool = build_pool(
             "writer",
             settings,
@@ -140,10 +141,20 @@ impl SqliteRepo {
                 return Ok(0)
             }
         }
+
+        let expiry = e.expiration();
+
+        // If the event is already expired no need to persist it
+        if let Some(expiry) = expiry {
+            if expiry < unix_time() {
+                return Ok(0);
+            }
+        }
+
         // ignore if the event hash is a duplicate.
         let mut ins_count = tx.execute(
-            "INSERT OR IGNORE INTO event (event_hash, created_at, kind, author, delegated_by, content, first_seen, hidden) VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'), FALSE);",
-            params![id_blob, e.created_at, e.kind, pubkey_blob, delegator_blob, event_str]
+            "INSERT OR IGNORE INTO event (event_hash, created_at, kind, author, delegated_by, content, first_seen, hidden, expiration) VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'), FALSE, ?7);",
+            params![id_blob, e.created_at, e.kind, pubkey_blob, delegator_blob, event_str, expiry]
         )? as u64;
         if ins_count == 0 {
             // if the event was a duplicate, no need to insert event or
@@ -969,7 +980,7 @@ pub async fn db_checkpoint_task(pool: SqlitePool, frequency: Duration, checkpoin
         // WAL size in pages.
         let mut current_wal_size = 0;
         // WAL threshold for more aggressive checkpointing (10,000 pages, or about 40MB)
-        let wal_threshold = 1000*10;
+        let wal_threshold = 1000 * 10;
         // default threshold for the busy timer
         let busy_wait_default = Duration::from_secs(1);
         // if the WAL file is getting too big, switch to this
@@ -996,6 +1007,14 @@ pub async fn db_checkpoint_task(pool: SqlitePool, frequency: Duration, checkpoin
                             current_wal_size = new_size;
                         }
                     }
+                },
+                _ = tokio::time::sleep(frequency) => {
+                    if let Ok(mut conn) = pool.get() {
+                        if let Err(err) = delete_expired_events(&mut conn) {
+                            warn!("Could not delete expired events: {:?}", err);
+                        }
+                    }
+
                 }
             };
         }
@@ -1010,6 +1029,22 @@ enum SqliteStatus {
     Busy,
     Error,
     Other(u64),
+}
+
+/// Delete expired events
+pub fn delete_expired_events(conn: &mut PooledConnection) -> Result<()> {
+    let tx = conn.transaction().unwrap();
+    {
+        let time_now = unix_time().to_string();
+
+        let query = "DELETE FROM event WHERE expiration < ?1;";
+        let mut stmt = tx.prepare(query).unwrap();
+        stmt.execute([time_now]).unwrap();
+    }
+    tx.commit().unwrap();
+
+    info!("Deleted expired events");
+    Ok(())
 }
 
 /// Checkpoint/Truncate WAL.  Returns the number of WAL pages remaining.
@@ -1036,7 +1071,6 @@ pub fn checkpoint_db(conn: &mut PooledConnection) -> Result<usize> {
     );
     Ok(wal_size as usize)
 }
-
 
 /// Produce a arbitrary list of '?' parameters.
 fn repeat_vars(count: usize) -> String {
@@ -1070,7 +1104,6 @@ fn log_pool_stats(name: &str, pool: &SqlitePool) {
         pool.max_size()
     );
 }
-
 
 /// Check if the pool is fully utilized
 fn _pool_at_capacity(pool: &SqlitePool) -> bool {
