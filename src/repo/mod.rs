@@ -60,21 +60,16 @@ pub trait NostrRepo: Send + Sync {
     async fn get_oldest_user_verification(&self, before: u64) -> Result<VerificationRecord>;
 
     /// Create a new user
-    async fn create_user(&self, pubkey: &str) -> Result<bool>;
+    async fn create_account(&self, pubkey: &str) -> Result<bool>; 
 
-    /// Admit a user
-    async fn admit_user(&self, pubkey: &str) -> Result<()>;
+    /// Admit a user 
+    async fn admit_account(&self, pubkey: &str) -> Result<()>;
 
     /// Gets user balance if they are an admitted pubkey
-    async fn get_user_balance(&self, pubkey: &str) -> Result<(bool, u64)>;
+    async fn get_account_balance(&self, pubkey: &str) -> Result<(bool, u64)>;
 
     /// Update user balance
-    async fn update_user_balance(
-        &self,
-        pub_key: &str,
-        positive: bool,
-        new_balance: u64,
-    ) -> Result<()>;
+    async fn update_account_balance(&self, pub_key: &str, positive: bool, new_balance: u64) -> Result<()>;
 
     /// Create invoice record
     async fn create_invoice_record(&self, pubkey: &str, invoice_info: InvoiceInfo) -> Result<()>;

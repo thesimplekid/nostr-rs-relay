@@ -65,6 +65,7 @@ pub enum InvoiceStatus {
     Expired,
 }
 
+
 impl ToString for InvoiceStatus {
     fn to_string(&self) -> String {
         match self {
@@ -180,7 +181,7 @@ impl Payment {
         // If use is already in DB this will be false
         // This avoids resending admission invoices
         // FIXME: It should be more intelligent resend after x time?
-        if !self.repo.create_user(pubkey).await? {
+        if !self.repo.create_account(pubkey).await? {
             return Err(Error::UnknownError);
         }
 

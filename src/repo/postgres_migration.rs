@@ -269,7 +269,7 @@ mod m004 {
             sql: vec![
                 r#"
 -- Create user table
-CREATE TABLE "users" (
+CREATE TABLE "account" (
     pubkey varchar NOT NULL,
     is_admitted BOOLEAN NOT NULL DEFAULT FALSE,
     balance bigint NOT NULL,

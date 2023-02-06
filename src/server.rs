@@ -202,7 +202,7 @@ async fn handle_web_request(
                 .await
                 .unwrap();
 
-            repo.admit_user(&pubkey).await.unwrap();
+            repo.admit_account(&pubkey).await.unwrap();
 
             Ok(Response::builder()
                 .status(StatusCode::OK)

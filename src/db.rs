@@ -149,7 +149,7 @@ pub async fn db_writer(
         } else if whitelist.is_none()
             || (whitelist.is_some() && !whitelist.as_ref().unwrap().contains(&event.pubkey))
         {
-            match repo.get_user_balance(&event.pubkey).await {
+            match repo.get_account_balance(&event.pubkey).await {
                 Ok((user_admitted, balance)) => {
                     // Checks to make sure user is admitted
                     if !user_admitted {
@@ -293,10 +293,9 @@ pub async fn db_writer(
                         // No need to update user balance
                         if pay_to_relay_enabled && cost_per_event > 0 {
                             // If the user balance is some, user was not on whitelist
-                            // Their balance should be reduced by the cost to post
-                            if let Some(balance) = user_balance {
-                                repo.update_user_balance(&event.pubkey, false, cost_per_event)
-                                    .await?;
+                            // Their balance should be reduced by the cost per event
+                            if let Some(_balance) = user_balance {
+                                repo.update_account_balance(&event.pubkey, false, cost_per_event).await.unwrap();
                             }
                         }
                         info!(

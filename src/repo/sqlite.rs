@@ -708,8 +708,8 @@ impl NostrRepo for SqliteRepo {
         }).await?
     }
 
-    /// Create user
-    async fn create_user(&self, pub_key: &str) -> Result<bool> {
+    /// Create account
+    async fn create_account(&self, pub_key: &str) -> Result<bool> {
         let pub_key = pub_key.to_owned();
         let mut conn = self.write_pool.get()?;
         let ins_count =  tokio::task::spawn_blocking(move || {
@@ -717,7 +717,7 @@ impl NostrRepo for SqliteRepo {
             let ins_count: u64;
             {
                 // Ignore if user is already in db
-                let query = "INSERT OR IGNORE INTO user (pubkey, is_admitted, balance) VALUES (?1, ?2, ?3);";
+                let query = "INSERT OR IGNORE INTO account (pubkey, is_admitted, balance) VALUES (?1, ?2, ?3);";
                 let mut stmt = tx.prepare(query)?;
                 ins_count = stmt.execute(params![&pub_key, false, 0])? as u64;
             }
@@ -733,14 +733,14 @@ impl NostrRepo for SqliteRepo {
         Ok(true)
     }
 
-    /// Admit user
-    async fn admit_user(&self, pub_key: &str) -> Result<()> {
+    /// Admit account
+    async fn admit_account(&self, pub_key: &str) -> Result<()> {
         let mut conn = self.write_pool.get()?;
         let pub_key = pub_key.to_owned();
         tokio::task::spawn_blocking(move || {
             let tx = conn.transaction()?;
             {
-                let query = "UPDATE user SET is_admitted = TRUE, tos_accepted_at =  strftime('%s','now') WHERE pubkey=?";
+                let query = "UPDATE account SET is_admitted = TRUE, tos_accepted_at =  strftime('%s','now') WHERE pubkey=?";
                 let mut stmt = tx.prepare(query)?;
                 stmt.execute(params![pub_key])?;
             }
@@ -751,13 +751,13 @@ impl NostrRepo for SqliteRepo {
             .await?
     }
 
-    /// Gets if the user is admitted and balance
-    async fn get_user_balance(&self, pub_key: &str) -> Result<(bool, u64)> {
+    /// Gets if the account is admitted and balance
+    async fn get_account_balance(&self, pub_key: &str) -> Result<(bool, u64)> {
         let mut conn = self.write_pool.get()?;
         let pub_key = pub_key.to_owned();
         tokio::task::spawn_blocking(move || {
             let tx = conn.transaction()?;
-            let query = "SELECT u.is_admitted, u.balance FROM user u WHERE pubkey = ?1;";
+            let query = "SELECT is_admitted, balance FROM account WHERE pubkey = ?1;";
             let mut stmt = tx.prepare_cached(query)?;
             let fields = stmt.query_row(params![pub_key], |r| {
                 let is_admitted: bool = r.get(0)?;
@@ -771,21 +771,17 @@ impl NostrRepo for SqliteRepo {
     }
 
     /// Update user balance
-    async fn update_user_balance(
-        &self,
-        pub_key: &str,
-        positive: bool,
-        new_balance: u64,
-    ) -> Result<()> {
+    async fn update_account_balance(&self, pub_key: &str, positive: bool, new_balance: u64) -> Result<()> {
         let mut conn = self.write_pool.get()?;
         let pub_key = pub_key.to_owned();
         tokio::task::spawn_blocking(move || {
             let tx = conn.transaction()?;
             {
-                let query = if positive {
-                    "UPDATE user SET balance=balance + new_balance WHERE pubkey=?"
+                let query: &str;
+                if positive {
+                    query = "UPDATE account SET balance=balance + ?1 WHERE pubkey=?2";
                 } else {
-                    "UPDATE user SET balance=balance - new_balance WHERE pubkey=?"
+                    query = "UPDATE account SET balance=balance - ?1 WHERE pubkey=?2";
                 };
                 let mut stmt = tx.prepare(query)?;
                 stmt.execute(params![new_balance, pub_key])?;
@@ -837,14 +833,16 @@ impl NostrRepo for SqliteRepo {
 
                 })?;
 
+
+                    
                 let query = "UPDATE invoice SET status=?1 WHERE payment_hash=?2;";
                 let mut stmt = tx.prepare(query)?;
                 stmt.execute(params![status.to_string(), payment_hash])?;
 
-                if prev_status == "unpaid" && status.eq(&InvoiceStatus::Paid) {
+                if prev_status == "Unpaid" && status.eq(&InvoiceStatus::Paid) {
 
                     let query =
-                            "UPDATE user SET balance = balance + (SELECT amount FROM invoice WHERE payment_hash = ?1) WHERE pubkey = ?2;";
+                            "UPDATE account SET balance = balance + (SELECT amount FROM invoice WHERE payment_hash = ?1) WHERE pubkey = ?2;";
                     let mut stmt = tx.prepare(query)?;
                     stmt.execute(params![payment_hash, pub_key])?;
                 }

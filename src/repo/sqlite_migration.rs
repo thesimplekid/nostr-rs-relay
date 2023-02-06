@@ -91,23 +91,23 @@ FOREIGN KEY(metadata_event) REFERENCES event(id) ON UPDATE CASCADE ON DELETE CAS
 CREATE INDEX IF NOT EXISTS user_verification_name_index ON user_verification(name);
 CREATE INDEX IF NOT EXISTS user_verification_event_index ON user_verification(metadata_event);
 
--- User table
-CREATE TABLE IF NOT EXISTS user (
+-- Create account table
+CREATE TABLE IF NOT EXISTS account (
 pubkey TEXT PRIMARY KEY,
 is_admitted INTEGER NOT NULL DEFAULT 0,
 balance INTEGER NOT NULL DEFAULT 0,
 tos_accepted_at INTEGER
 );
 
--- Create user index
-CREATE INDEX IF NOT EXISTS user_pubkey_index ON user(pubkey);
+-- Create account index
+CREATE INDEX IF NOT EXISTS user_pubkey_index ON account(pubkey);
 
 -- Invoice table
 CREATE TABLE IF NOT EXISTS invoice (
 payment_hash TEXT PRIMARY KEY, 
 pubkey BLOB NOT NULL,
 amount INTEGER NOT NULL,
-status TEXT CHECK ( status IN ('paid', 'unpaid', 'expired' ) ) NOT NUll DEFAULT 'pending',
+status TEXT CHECK ( status IN ('Paid', 'Unpaid', 'Expired' ) ) NOT NUll DEFAULT 'Unpaid',
 description TEXT,
 created_at INTEGER NOT NULL,
 confirmed_at INTEGER
@@ -695,7 +695,7 @@ CREATE TABLE IF NOT EXISTS invoice (
 payment_hash TEXT PRIMARY KEY,
 pubkey TEXT NOT NULL,
 amount INTEGER NOT NULL,
-status TEXT CHECK ( status IN ('paid', 'unpaid', 'expired' ) ) NOT NUll DEFAULT 'pending',
+status TEXT CHECK ( status IN ('Paid', 'Unpaid', 'Expired' ) ) NOT NUll DEFAULT 'pending',
 description TEXT,
 confirmed_at INTEGER,
 created_at: INTEGER NOT NULL
@@ -704,9 +704,9 @@ created_at: INTEGER NOT NULL
 -- Create invoice index
 CREATE INDEX IF NOT EXISTS invoice_pubkey_index ON invoice(pubkey);
 
--- Create users table
+-- Create account table
 
-CREATE TABLE IF NOT EXISTS user (
+CREATE TABLE IF NOT EXISTS account (
 pubkey TEXT PRIMARY KEY,
 is_admitted INTEGER NOT NULL DEFAULT 0,
 balance INTEGER NOT NULL DEFAULT 0,
@@ -714,8 +714,8 @@ tos_accepted_at INTEGER
 -- FOREIGN KEY(pubkey) REFERENCES invoice(pubkey) ON UPDATE CASCADE ON DELETE CASCADE
 );
 
--- Create user index
-CREATE INDEX IF NOT EXISTS user_pubkey_index ON user(pubkey);
+-- Create account index
+CREATE INDEX IF NOT EXISTS account_pubkey_index ON account(pubkey);
 
 
 pragma optimize;

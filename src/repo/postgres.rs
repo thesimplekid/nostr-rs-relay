@@ -506,10 +506,10 @@ ON CONFLICT (id) DO NOTHING"#,
             .ok_or(error::Error::SqlxError(RowNotFound))
     }
 
-    async fn create_user(&self, pub_key: &str) -> Result<bool> {
+    async fn create_account(&self, pub_key: &str) -> Result<bool> {
         let mut tx = self.conn.begin().await?;
         let ins_count =
-            sqlx::query("INSERT INTO users (pubkey, is_admitted, balance) VALUES ($1, FALSE, 0);")
+            sqlx::query("INSERT INTO account (pubkey, is_admitted, balance) VALUES ($1, FALSE, 0);")
                 .bind(pub_key)
                 .execute(&mut tx)
                 .await?
@@ -520,20 +520,20 @@ ON CONFLICT (id) DO NOTHING"#,
         Ok(ins_count == 1)
     }
 
-    async fn admit_user(&self, pub_key: &str) -> Result<()> {
-        sqlx::query("UPDATE users SET is_admitted = TRUE WHERE pubkey = $1")
+    async fn admit_account(&self, pub_key: &str) -> Result<()> {
+        sqlx::query("UPDATE account SET is_admitted = TRUE WHERE pubkey = $1")
             .bind(pub_key)
             .execute(&self.conn)
             .await?;
         Ok(())
     }
 
-    async fn get_user_balance(&self, pub_key: &str) -> Result<(bool, u64)> {
+    async fn get_account_balance(&self, pub_key: &str) -> Result<(bool, u64)> {
         let query = r#"SELECT
-            u.is_admitted,
-            u.balance
-            FROM users u 
-            WHERE u.pubkey = $1
+            is_admitted,
+            balance
+            FROM account 
+            WHERE pubkey = $1
             LIMIT 1"#;
 
         let result = sqlx::query_as::<_, (bool, i64)>(query)
@@ -545,7 +545,7 @@ ON CONFLICT (id) DO NOTHING"#,
         Ok((result.0, result.1 as u64))
     }
 
-    async fn update_user_balance(
+    async fn update_account_balance(
         &self,
         pub_key: &str,
         positive: bool,
@@ -553,14 +553,14 @@ ON CONFLICT (id) DO NOTHING"#,
     ) -> Result<()> {
         match positive {
             true => {
-                sqlx::query("UPDATE users SET balance = balance + $1 WHERE pubkey = $2")
+                sqlx::query("UPDATE account SET balance = balance + $1 WHERE pubkey = $2")
                     .bind(new_balance as i64)
                     .bind(pub_key)
                     .execute(&self.conn)
                     .await?
             }
             false => {
-                sqlx::query("UPDATE users SET balance = balance - $1 WHERE pubkey = $2")
+                sqlx::query("UPDATE account SET balance = balance - $1 WHERE pubkey = $2")
                     .bind(new_balance as i64)
                     .bind(pub_key)
                     .execute(&self.conn)
@@ -606,7 +606,7 @@ ON CONFLICT (id) DO NOTHING"#,
             .await?;
 
         if prev_invoice_status.eq(&InvoiceStatus::Unpaid) && status.eq(&InvoiceStatus::Paid) {
-            sqlx::query("UPDATE users SET balance = balance + (SELECT amount FROM invoice WHERE payment_hash = $1) WHERE pubkey = $2")
+            sqlx::query("UPDATE account SET balance = balance + (SELECT amount FROM invoice WHERE payment_hash = $1) WHERE pubkey = $2")
                 .bind(payment_hash)
                 .bind(&pubkey)
                 .execute(&self.conn)
