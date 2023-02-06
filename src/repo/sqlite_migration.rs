@@ -110,7 +110,8 @@ amount INTEGER NOT NULL,
 status TEXT CHECK ( status IN ('Paid', 'Unpaid', 'Expired' ) ) NOT NUll DEFAULT 'Unpaid',
 description TEXT,
 created_at INTEGER NOT NULL,
-confirmed_at INTEGER
+confirmed_at INTEGER,
+CONSTRAINT invoice_pubkey_fkey FOREIGN KEY (pubkey) REFERENCES account (pubkey) ON DELETE CASCADE
 );
 
 -- Create invoice index
@@ -710,8 +711,8 @@ CREATE TABLE IF NOT EXISTS account (
 pubkey TEXT PRIMARY KEY,
 is_admitted INTEGER NOT NULL DEFAULT 0,
 balance INTEGER NOT NULL DEFAULT 0,
-tos_accepted_at INTEGER
--- FOREIGN KEY(pubkey) REFERENCES invoice(pubkey) ON UPDATE CASCADE ON DELETE CASCADE
+tos_accepted_at INTEGER,
+CONSTRAINT invoice_pubkey_fkey FOREIGN KEY (pubkey) REFERENCES account (pubkey) ON DELETE CASCADE
 );
 
 -- Create account index

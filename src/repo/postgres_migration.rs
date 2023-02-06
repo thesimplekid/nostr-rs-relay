@@ -288,7 +288,8 @@ CREATE TABLE "invoice" (
     description varchar,
     confirmed_at timestamp,
     created_at timestamp,
-    CONSTRAINT invoice_payment_hash PRIMARY KEY (payment_hash)
+    CONSTRAINT invoice_payment_hash PRIMARY KEY (payment_hash),
+    CONSTRAINT invoice_pubkey_fkey FOREIGN KEY (pubkey) REFERENCES account (pubkey) ON DELETE CASCADE
 );
         "#,
             ],
