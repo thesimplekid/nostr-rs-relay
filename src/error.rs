@@ -62,6 +62,10 @@ pub enum Error {
     HexError(hex::FromHexError),
     #[error("Delegation parse error")]
     DelegationParseError,
+    #[error("Event builder error")]
+    EventError(nostr::event::builder::Error),
+    //#[error("Request error")]
+    // ReqError(minreq::Error),
     #[error("Unknown/Undocumented")]
     UnknownError,
 }
@@ -130,3 +134,18 @@ impl From<config::ConfigError> for Error {
         Error::ConfigError(r)
     }
 }
+
+impl From<nostr::event::builder::Error> for Error {
+    /// Wrap event builder error
+    fn from(r: nostr::event::builder::Error) -> Self {
+        Error::EventError(r)
+    }
+}
+
+/*
+impl From<minreq::Error> for Error {
+    fn from(r: minreq::Error) -> Self {
+        Error::ReqError(r)
+    }
+}
+*/

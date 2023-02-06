@@ -35,6 +35,7 @@ pub async fn run_migrations(db: &PostgresPool) -> crate::error::Result<usize> {
         m002::rebuild_tags(db).await?;
     }
     run_migration(m003::migration(), db).await;
+    run_migration(m004::migration(), db).await;
     Ok(current_version(db).await as usize)
 }
 
@@ -251,6 +252,44 @@ mod m003 {
                 r#"
 -- Add unique constraint on tag
 ALTER TABLE tag ADD CONSTRAINT unique_constraint_name UNIQUE (event_id, "name", value);
+        "#,
+            ],
+        }
+    }
+}
+
+mod m004 {
+    use crate::repo::postgres_migration::{Migration, SimpleSqlMigration};
+
+    pub const VERSION: i64 = 4;
+
+    pub fn migration() -> impl Migration {
+        SimpleSqlMigration {
+            serial_number: VERSION,
+            sql: vec![
+                r#"
+-- Create user table
+CREATE TABLE "users" (
+    pubkey varchar NOT NULL,
+    is_admitted BOOLEAN NOT NULL DEFAULT FALSE,
+    balance bigint NOT NULL,
+    tos_accepted_at TIMESTAMP,
+    CONSTRAINT user_pkey PRIMARY KEY (pubkey)
+);
+
+CREATE TYPE status AS ENUM ('Paid', 'Unpaid', 'Expired');
+
+
+CREATE TABLE "invoice" (
+    payment_hash varchar NOT NULL,
+    pubkey varchar NOT NULL,
+    amount integer NOT NULL,
+    status status NOT NULL DEFAULT 'Unpaid',
+    description varchar,
+    confirmed_at timestamp,
+    created_at timestamp,
+    CONSTRAINT invoice_payment_hash PRIMARY KEY (payment_hash)
+);
         "#,
             ],
         }

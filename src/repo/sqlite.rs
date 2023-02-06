@@ -7,6 +7,7 @@ use crate::event::{single_char_tagname, Event};
 use crate::hexrange::hex_range;
 use crate::hexrange::HexSearch;
 use crate::nip05::{Nip05Name, VerificationRecord};
+use crate::payment::{InvoiceInfo, InvoiceStatus};
 use crate::repo::sqlite_migration::{upgrade_db, STARTUP_SQL};
 use crate::server::NostrMetrics;
 use crate::subscription::{ReqFilter, Subscription};
@@ -705,6 +706,157 @@ impl NostrRepo for SqliteRepo {
             };
             Ok(vr)
         }).await?
+    }
+
+    /// Create user
+    async fn create_user(&self, pub_key: &str) -> Result<bool> {
+        let pub_key = pub_key.to_owned();
+        let mut conn = self.write_pool.get()?;
+        let ins_count =  tokio::task::spawn_blocking(move || {
+            let tx = conn.transaction()?;
+            let ins_count: u64;
+            {
+                // Ignore if user is already in db
+                let query = "INSERT OR IGNORE INTO user (pubkey, is_admitted, balance) VALUES (?1, ?2, ?3);";
+                let mut stmt = tx.prepare(query)?;
+                ins_count = stmt.execute(params![&pub_key, false, 0])? as u64;
+            }
+            tx.commit()?;
+            let ok: Result<u64> = Ok(ins_count);
+            ok
+        }).await??;
+
+        if ins_count != 1 {
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    /// Admit user
+    async fn admit_user(&self, pub_key: &str) -> Result<()> {
+        let mut conn = self.write_pool.get()?;
+        let pub_key = pub_key.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let tx = conn.transaction()?;
+            {
+                let query = "UPDATE user SET is_admitted = TRUE, tos_accepted_at =  strftime('%s','now') WHERE pubkey=?";
+                let mut stmt = tx.prepare(query)?;
+                stmt.execute(params![pub_key])?;
+            }
+            tx.commit()?;
+            let ok: Result<()> = Ok(());
+            ok
+        })
+            .await?
+    }
+
+    /// Gets if the user is admitted and balance
+    async fn get_user_balance(&self, pub_key: &str) -> Result<(bool, u64)> {
+        let mut conn = self.write_pool.get()?;
+        let pub_key = pub_key.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let tx = conn.transaction()?;
+            let query = "SELECT u.is_admitted, u.balance FROM user u WHERE pubkey = ?1;";
+            let mut stmt = tx.prepare_cached(query)?;
+            let fields = stmt.query_row(params![pub_key], |r| {
+                let is_admitted: bool = r.get(0)?;
+                let balance: u64 = r.get(1)?;
+                // create a tuple since we can't throw non-rusqlite errors in this closure
+                Ok((is_admitted, balance))
+            })?;
+            Ok(fields)
+        })
+        .await?
+    }
+
+    /// Update user balance
+    async fn update_user_balance(
+        &self,
+        pub_key: &str,
+        positive: bool,
+        new_balance: u64,
+    ) -> Result<()> {
+        let mut conn = self.write_pool.get()?;
+        let pub_key = pub_key.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let tx = conn.transaction()?;
+            {
+                let query = if positive {
+                    "UPDATE user SET balance=balance + new_balance WHERE pubkey=?"
+                } else {
+                    "UPDATE user SET balance=balance - new_balance WHERE pubkey=?"
+                };
+                let mut stmt = tx.prepare(query)?;
+                stmt.execute(params![new_balance, pub_key])?;
+            };
+            tx.commit()?;
+            let ok: Result<()> = Ok(());
+            ok
+        })
+        .await?
+    }
+
+    /// Create invoice record
+    async fn create_invoice_record(&self, pub_key: &str, invoice_info: InvoiceInfo) -> Result<()> {
+        let pub_key = pub_key.to_owned();
+        let mut conn = self.write_pool.get()?;
+        tokio::task::spawn_blocking(move || {
+            debug!("CreareInvoice: {:?}", invoice_info);
+            let tx = conn.transaction()?;
+            {
+                let query = "INSERT INTO invoice (pubkey, payment_hash, amount, status, description, created_at) VALUES (?1, ?2, ?3, ?4, ?5, strftime('%s','now'));";
+                let mut stmt = tx.prepare(query)?;
+                stmt.execute(params![&pub_key, invoice_info.payment_hash, invoice_info.amount, invoice_info.status.to_string(), invoice_info.memo])?;
+            }
+            tx.commit()?;
+            let ok: Result<()> = Ok(());
+            ok
+        }).await??;
+
+        Ok(())
+    }
+
+    /// Update invoice
+    async fn update_invoice(&self, payment_hash: &str, status: InvoiceStatus) -> Result<String> {
+        let mut conn = self.write_pool.get()?;
+        let payment_hash = payment_hash.to_owned();
+        let pub_key = tokio::task::spawn_blocking(move || {
+            let tx = conn.transaction()?;
+            let pubkey: String;
+            {
+
+                let query = "SELECT pubkey, status FROM invoice WHERE payment_hash=?1;";
+                let mut stmt = tx.prepare(query)?;
+                let (pub_key, prev_status) = stmt.query_row(params![payment_hash], |r| {
+                    let pub_key: String = r.get(0)?;
+                    let status: String = r.get(1)?;
+
+
+                    Ok((pub_key, status))
+
+                })?;
+
+                let query = "UPDATE invoice SET status=?1 WHERE payment_hash=?2;";
+                let mut stmt = tx.prepare(query)?;
+                stmt.execute(params![status.to_string(), payment_hash])?;
+
+                if prev_status == "unpaid" && status.eq(&InvoiceStatus::Paid) {
+
+                    let query =
+                            "UPDATE user SET balance = balance + (SELECT amount FROM invoice WHERE payment_hash = ?1) WHERE pubkey = ?2;";
+                    let mut stmt = tx.prepare(query)?;
+                    stmt.execute(params![payment_hash, pub_key])?;
+                }
+                pubkey = pub_key;
+            }
+
+            tx.commit()?;
+            let ok: Result<String> = Ok(pubkey);
+            ok
+        })
+        .await?;
+        pub_key
     }
 }
 

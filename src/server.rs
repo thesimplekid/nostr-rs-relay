@@ -11,12 +11,15 @@ use crate::event::EventCmd;
 use crate::info::RelayInfo;
 use crate::nip05;
 use crate::notice::Notice;
+use crate::payment;
+use crate::payment::LNBitsCallback;
 use crate::repo::NostrRepo;
 use crate::subscription::Subscription;
 use futures::SinkExt;
 use futures::StreamExt;
 use governor::{Jitter, Quota, RateLimiter};
 use http::header::HeaderMap;
+use hyper::body::to_bytes;
 use hyper::header::ACCEPT;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::upgrade::Upgraded;
@@ -62,6 +65,7 @@ async fn handle_web_request(
     registry: Registry,
     metrics: NostrMetrics,
 ) -> Result<Response<Body>, Infallible> {
+    debug!("{:?}", request);
     match (
         request.uri().path(),
         request.headers().contains_key(header::UPGRADE),
@@ -184,6 +188,25 @@ async fn handle_web_request(
                 .status(StatusCode::OK)
                 .header("Content-Type", "text/plain")
                 .body(Body::from(buffer))
+                .unwrap())
+        }
+        // LN bits callback endpoint for paid invoices
+        ("/lnbits", false) => {
+            // The status is returned as pending but webhook is only called when payed (i think)
+            // So think its okay to assume its paid
+            let callback: LNBitsCallback =
+                serde_json::from_slice(&to_bytes(request.into_body()).await.unwrap()).unwrap();
+
+            let pubkey = repo
+                .update_invoice(&callback.payment_hash, payment::InvoiceStatus::Paid)
+                .await
+                .unwrap();
+
+            repo.admit_user(&pubkey).await.unwrap();
+
+            Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::from("ok"))
                 .unwrap())
         }
         (_, _) => {
@@ -386,6 +409,8 @@ pub fn start_server(settings: &Settings, shutdown_rx: MpscReceiver<()>) -> Resul
         // metadata events.
         let (metadata_tx, metadata_rx) = broadcast::channel::<Event>(4096);
 
+        let (payment_tx, payment_rx) = broadcast::channel::<Event>(4096);
+
         let (registry, metrics) = create_metrics();
         // build a repository for events
         let repo = db::build_repo(&settings, metrics.clone()).await;
@@ -398,6 +423,7 @@ pub fn start_server(settings: &Settings, shutdown_rx: MpscReceiver<()>) -> Resul
             event_rx,
             bcast_tx.clone(),
             metadata_tx.clone(),
+            payment_tx.clone(),
             shutdown_listen,
         ));
         info!("db writer created");
@@ -417,6 +443,18 @@ pub fn start_server(settings: &Settings, shutdown_rx: MpscReceiver<()>) -> Resul
                         v.run().await;
                     });
                 }
+            }
+        }
+
+        // Create payments thread if pay to relay enabled
+        if settings.pay_to_relay.enabled {
+            let payment_opt =
+                payment::Payment::new(repo.clone(), payment_rx, bcast_tx.clone(), settings.clone());
+            if let Ok(mut p) = payment_opt {
+                tokio::task::spawn(async move {
+                    info!("starting payment process ...");
+                    p.run().await;
+                });
             }
         }
 

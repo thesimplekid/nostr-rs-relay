@@ -22,7 +22,7 @@ pragma mmap_size = 17179869184; -- cap mmap at 16GB
 "##;
 
 /// Latest database version
-pub const DB_VERSION: usize = 15;
+pub const DB_VERSION: usize = 16;
 
 /// Schema definition
 const INIT_SQL: &str = formatcp!(
@@ -90,6 +90,33 @@ FOREIGN KEY(metadata_event) REFERENCES event(id) ON UPDATE CASCADE ON DELETE CAS
 );
 CREATE INDEX IF NOT EXISTS user_verification_name_index ON user_verification(name);
 CREATE INDEX IF NOT EXISTS user_verification_event_index ON user_verification(metadata_event);
+
+-- User table
+CREATE TABLE IF NOT EXISTS user (
+pubkey TEXT PRIMARY KEY,
+is_admitted INTEGER NOT NULL DEFAULT 0,
+balance INTEGER NOT NULL DEFAULT 0,
+tos_accepted_at INTEGER
+);
+
+-- Create user index
+CREATE INDEX IF NOT EXISTS user_pubkey_index ON user(pubkey);
+
+-- Invoice table
+CREATE TABLE IF NOT EXISTS invoice (
+payment_hash TEXT PRIMARY KEY, 
+pubkey BLOB NOT NULL,
+amount INTEGER NOT NULL,
+status TEXT CHECK ( status IN ('paid', 'unpaid', 'expired' ) ) NOT NUll DEFAULT 'pending',
+description TEXT,
+created_at INTEGER NOT NULL,
+confirmed_at INTEGER
+);
+
+-- Create invoice index
+CREATE INDEX IF NOT EXISTS invoice_pubkey_index ON invoice(pubkey);
+
+
 "##,
     DB_VERSION
 );
@@ -200,6 +227,9 @@ pub fn upgrade_db(conn: &mut PooledConnection) -> Result<usize> {
             }
             if curr_version == 14 {
                 curr_version = mig_14_to_15(conn)?;
+            }
+            if curr_version == 15 {
+                curr_version = mig_15_to_16(conn)?;
             }
 
             if curr_version == DB_VERSION {
@@ -655,4 +685,50 @@ PRAGMA user_version = 15;
         }
     }
     Ok(15)
+}
+
+fn mig_15_to_16(conn: &mut PooledConnection) -> Result<usize> {
+    info!("database schema needs update from 15->16");
+    let upgrade_sql = r##"
+-- Create invoices table
+CREATE TABLE IF NOT EXISTS invoice (
+payment_hash TEXT PRIMARY KEY,
+pubkey TEXT NOT NULL,
+amount INTEGER NOT NULL,
+status TEXT CHECK ( status IN ('paid', 'unpaid', 'expired' ) ) NOT NUll DEFAULT 'pending',
+description TEXT,
+confirmed_at INTEGER,
+created_at: INTEGER NOT NULL
+);
+
+-- Create invoice index
+CREATE INDEX IF NOT EXISTS invoice_pubkey_index ON invoice(pubkey);
+
+-- Create users table
+
+CREATE TABLE IF NOT EXISTS user (
+pubkey TEXT PRIMARY KEY,
+is_admitted INTEGER NOT NULL DEFAULT 0,
+balance INTEGER NOT NULL DEFAULT 0,
+tos_accepted_at INTEGER
+-- FOREIGN KEY(pubkey) REFERENCES invoice(pubkey) ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- Create user index
+CREATE INDEX IF NOT EXISTS user_pubkey_index ON user(pubkey);
+
+
+pragma optimize;
+PRAGMA user_version = 16;
+"##;
+    match conn.execute_batch(upgrade_sql) {
+        Ok(()) => {
+            info!("database schema upgraded v15 -> v16");
+        }
+        Err(err) => {
+            error!("update failed: {}", err);
+            panic!("database could not be upgraded");
+        }
+    }
+    Ok(16)
 }

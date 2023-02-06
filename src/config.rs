@@ -70,6 +70,17 @@ pub struct Limits {
 pub struct Authorization {
     pub pubkey_whitelist: Option<Vec<String>>, // If present, only allow these pubkeys to publish events
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(unused)]
+pub struct PayToRelay {
+    pub enabled: bool,
+    pub admission_cost: u64, // Cost to have pubkey whitelisted
+    pub cost_per_event: u64, // Cost author to pay per event
+    pub tor_proxy: Option<String>,
+    pub cln_node_url: Option<String>,
+    pub api_secret: Option<String>,
+    pub terms_message: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(unused)]
@@ -148,6 +159,7 @@ pub struct Settings {
     pub network: Network,
     pub limits: Limits,
     pub authorization: Authorization,
+    pub pay_to_relay: PayToRelay,
     pub verified_users: VerifiedUsers,
     pub retention: Retention,
     pub options: Options,
@@ -242,6 +254,15 @@ impl Default for Settings {
             },
             authorization: Authorization {
                 pubkey_whitelist: None, // Allow any address to publish
+            },
+            pay_to_relay: PayToRelay {
+                enabled: false,
+                admission_cost: 0,
+                cost_per_event: 10,
+                terms_message: "".to_string(),
+                tor_proxy: None,
+                cln_node_url: None,
+                api_secret: None,
             },
             verified_users: VerifiedUsers {
                 mode: VerifiedUsersMode::Disabled,
