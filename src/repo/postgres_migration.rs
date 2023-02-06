@@ -268,13 +268,13 @@ mod m004 {
             serial_number: VERSION,
             sql: vec![
                 r#"
--- Create user table
+-- Create account table
 CREATE TABLE "account" (
     pubkey varchar NOT NULL,
     is_admitted BOOLEAN NOT NULL DEFAULT FALSE,
     balance bigint NOT NULL,
     tos_accepted_at TIMESTAMP,
-    CONSTRAINT user_pkey PRIMARY KEY (pubkey)
+    CONSTRAINT account_pkey PRIMARY KEY (pubkey)
 );
 
 CREATE TYPE status AS ENUM ('Paid', 'Unpaid', 'Expired');
