@@ -65,7 +65,6 @@ pub enum InvoiceStatus {
     Expired,
 }
 
-
 impl ToString for InvoiceStatus {
     fn to_string(&self) -> String {
         match self {
@@ -251,8 +250,6 @@ impl Payment {
                     status: InvoiceStatus::Unpaid,
                     confirmed_at: None,
                 };
-
-                println!("{:?}", &invoice_info);
             }
         }
 
@@ -284,7 +281,6 @@ impl Payment {
             .await?;
 
         // Broadcast event
-        // FIXME: events are not getting broadcasted
         self.event_tx.send(message_event.clone().into()).ok();
         self.event_tx.send(invoice_event.clone().into()).ok();
 

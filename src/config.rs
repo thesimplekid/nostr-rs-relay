@@ -80,6 +80,7 @@ pub struct PayToRelay {
     pub cln_node_url: Option<String>,
     pub api_secret: Option<String>,
     pub terms_message: String,
+    pub sign_ups: bool // allow new users to sign up to relay
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,6 +264,7 @@ impl Default for Settings {
                 tor_proxy: None,
                 cln_node_url: None,
                 api_secret: None,
+                sign_ups: false
             },
             verified_users: VerifiedUsers {
                 mode: VerifiedUsersMode::Disabled,

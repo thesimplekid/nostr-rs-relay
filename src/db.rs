@@ -126,6 +126,8 @@ pub async fn db_writer(
 
         // Set to none until balance is got from db
         // Will stay none if user in whitelisted and does not have to pay to post
+        // When pay to relay is enabled the whitelist is not a list of who can post
+        // It is a list of who can post for free
         let mut user_balance: Option<u64> = None;
         if !pay_to_relay_enabled {
             // check if this event is authorized.
@@ -146,16 +148,21 @@ pub async fn db_writer(
                     continue;
                 }
             }
-        } else if whitelist.is_none()
-            || (whitelist.is_some() && !whitelist.as_ref().unwrap().contains(&event.pubkey))
-        {
-            match repo.get_account_balance(&event.pubkey).await {
-                Ok((user_admitted, balance)) => {
-                    // Checks to make sure user is admitted
-                    if !user_admitted {
-                        debug!("user: {}, is not admitted", &event.pubkey,);
+        } else {
+            // If the user is on whitelist there is no need to check if the user is admitted or has balance to post
+            if whitelist.is_none()
+                || (whitelist.is_some() && !whitelist.as_ref().unwrap().contains(&event.pubkey))
+            {
+                match repo.get_account_balance(&event.pubkey).await {
+                    Ok((user_admitted, balance)) => {
+                        // Checks to make sure user is admitted
+                        if !user_admitted {
+                            debug!("user: {}, is not admitted", &event.pubkey,);
 
-                        payment_tx.send(event.clone()).ok();
+                            // Only send admission message and invoice if sign ups enabled
+                            if settings.pay_to_relay.sign_ups {
+                                payment_tx.send(event.clone()).ok();
+                            }
 
                         notice_tx
                             .try_send(Notice::blocked(event.id, "User is not admitted"))
@@ -163,41 +170,43 @@ pub async fn db_writer(
                         continue;
                     }
 
-                    // Checks that user has enough balance to post
-                    if balance < cost_per_event {
-                        debug!("user: {}, does not have a balance", &event.pubkey,);
-                        notice_tx
-                            .try_send(Notice::blocked(event.id, "Insufficient balance"))
-                            .ok();
+                        // Checks that user has enough balance to post
+                        // TODO: this should send an invoice to user to top up
+                        if balance < cost_per_event {
+                            debug!("user: {}, does not have a balance", &event.pubkey,);
+                            notice_tx
+                                .try_send(Notice::blocked(event.id, "Insufficient balance"))
+                                .ok();
+                            continue;
+                        }
+                        user_balance = Some(balance);
+                        debug!("User balance: {:?}", user_balance);
+                    }
+                    Err(Error::SqlError(rusqlite::Error::QueryReturnedNoRows)) => {
+                        // User does not exist
+                        // TODO: Send DM to user to sign up
+                        info!("Unregistered user");
+                        payment_tx.send(event.clone()).ok();
+                        let msg = "Pubkey not registered";
+                        notice_tx.try_send(Notice::error(event.id, msg)).ok();
                         continue;
                     }
-                    user_balance = Some(balance);
-                    debug!("User balance: {:?}", user_balance);
-                }
-                Err(Error::SqlError(rusqlite::Error::QueryReturnedNoRows)) => {
-                    // User does not exist
-                    // TODO: Send DM to user to sign up
-                    info!("Unregistered user");
-                    payment_tx.send(event.clone()).ok();
-                    let msg = "Pubkey not registered";
-                    notice_tx.try_send(Notice::error(event.id, msg)).ok();
-                    continue;
-                }
-                Err(Error::SqlxError(sqlx::Error::RowNotFound)) => {
-                    // User does not exist
-                    // TODO: Send DM to user to sign up
-                    info!("Unregistered user");
-                    payment_tx.send(event.clone()).ok();
-                    let msg = "Pubkey not registered";
-                    notice_tx.try_send(Notice::error(event.id, msg)).ok();
-                    continue;
-                }
-                Err(err) => {
-                    warn!("Error checking admission status: {:?}", err);
-                    let msg = "relay experienced an error checking your admission status";
-                    notice_tx.try_send(Notice::error(event.id, msg)).ok();
-                    // Other error
-                    continue;
+                    Err(Error::SqlxError(sqlx::Error::RowNotFound)) => {
+                        // User does not exist
+                        // TODO: Send DM to user to sign up
+                        info!("Unregistered user");
+                        payment_tx.send(event.clone()).ok();
+                        let msg = "Pubkey not registered";
+                        notice_tx.try_send(Notice::error(event.id, msg)).ok();
+                        continue;
+                    }
+                    Err(err) => {
+                        warn!("Error checking admission status: {:?}", err);
+                        let msg = "relay experienced an error checking your admission status";
+                        notice_tx.try_send(Notice::error(event.id, msg)).ok();
+                        // Other error
+                        continue;
+                    }
                 }
             }
         }
@@ -289,15 +298,6 @@ pub async fn db_writer(
                         trace!("ignoring duplicate or deleted event");
                         notice_tx.try_send(Notice::duplicate(event.id)).ok();
                     } else {
-                        // If pay to relay is diabaled or the cost per event is 0
-                        // No need to update user balance
-                        if pay_to_relay_enabled && cost_per_event > 0 {
-                            // If the user balance is some, user was not on whitelist
-                            // Their balance should be reduced by the cost per event
-                            if let Some(_balance) = user_balance {
-                                repo.update_account_balance(&event.pubkey, false, cost_per_event).await.unwrap();
-                            }
-                        }
                         info!(
                             "persisted event: {:?} (kind: {}) from: {:?} in: {:?} (IP: {:?})",
                             event.get_event_id_prefix(),
@@ -313,7 +313,6 @@ pub async fn db_writer(
                     }
                 }
                 Err(err) => {
-                    // TODO: refund if failed
                     warn!("event insert failed: {:?}", err);
                     let msg = "relay experienced an error trying to publish the latest event";
                     notice_tx.try_send(Notice::error(event.id, msg)).ok();
@@ -323,6 +322,17 @@ pub async fn db_writer(
 
         // use rate limit, if defined, and if an event was actually written.
         if event_write {
+            // If pay to relay is diabaled or the cost per event is 0
+            // No need to update user balance
+            if pay_to_relay_enabled && cost_per_event > 0 {
+                // If the user balance is some, user was not on whitelist
+                // Their balance should be reduced by the cost per event
+                if let Some(_balance) = user_balance {
+                    repo.update_account_balance(&event.pubkey, false, cost_per_event)
+                        .await
+                        .unwrap();
+                }
+            }
             if let Some(ref lim) = lim_opt {
                 if let Err(n) = lim.check() {
                     let wait_for = n.wait_time_from(clock.now());
