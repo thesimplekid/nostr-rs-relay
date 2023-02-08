@@ -77,8 +77,8 @@ pub struct PayToRelay {
     pub admission_cost: u64, // Cost to have pubkey whitelisted
     pub cost_per_event: u64, // Cost author to pay per event
     pub tor_proxy: Option<String>,
-    pub cln_node_url: Option<String>,
-    pub api_secret: Option<String>,
+    pub node_url: String,
+    pub api_secret: String,
     pub terms_message: String,
     pub sign_ups: bool // allow new users to sign up to relay
 }
@@ -212,6 +212,9 @@ impl Settings {
         );
         // initialize durations for verified users
         settings.verified_users.init();
+
+        // TODO: ensure pay to relay settings are correct
+
         Ok(settings)
     }
 }
@@ -262,8 +265,8 @@ impl Default for Settings {
                 cost_per_event: 10,
                 terms_message: "".to_string(),
                 tor_proxy: None,
-                cln_node_url: None,
-                api_secret: None,
+                node_url: "".to_string(),
+                api_secret: "".to_string(),
                 sign_ups: false
             },
             verified_users: VerifiedUsers {

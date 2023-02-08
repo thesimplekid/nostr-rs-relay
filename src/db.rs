@@ -19,6 +19,9 @@ use std::time::{Duration, Instant};
 use tracing::log::LevelFilter;
 use tracing::{debug, info, trace, warn};
 
+use nostr::key::Keys;
+use nostr::key::FromPkStr;
+
 pub type SqlitePool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
 pub type PooledConnection = r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>;
 
@@ -153,7 +156,8 @@ pub async fn db_writer(
             if whitelist.is_none()
                 || (whitelist.is_some() && !whitelist.as_ref().unwrap().contains(&event.pubkey))
             {
-                match repo.get_account_balance(&event.pubkey).await {
+                let key = Keys::from_pk_str(&event.pubkey).unwrap();
+                match repo.get_account_balance(&key).await {
                     Ok((user_admitted, balance)) => {
                         // Checks to make sure user is admitted
                         if !user_admitted {
@@ -184,7 +188,6 @@ pub async fn db_writer(
                     }
                     Err(Error::SqlError(rusqlite::Error::QueryReturnedNoRows)) => {
                         // User does not exist
-                        // TODO: Send DM to user to sign up
                         info!("Unregistered user");
                         payment_tx.send(event.clone()).ok();
                         let msg = "Pubkey not registered";
@@ -193,7 +196,6 @@ pub async fn db_writer(
                     }
                     Err(Error::SqlxError(sqlx::Error::RowNotFound)) => {
                         // User does not exist
-                        // TODO: Send DM to user to sign up
                         info!("Unregistered user");
                         payment_tx.send(event.clone()).ok();
                         let msg = "Pubkey not registered";
@@ -328,7 +330,8 @@ pub async fn db_writer(
                 // If the user balance is some, user was not on whitelist
                 // Their balance should be reduced by the cost per event
                 if let Some(_balance) = user_balance {
-                    repo.update_account_balance(&event.pubkey, false, cost_per_event)
+                    let pubkey = Keys::from_pk_str(&event.pubkey)?;
+                    repo.update_account_balance(&pubkey, false, cost_per_event)
                         .await
                         .unwrap();
                 }

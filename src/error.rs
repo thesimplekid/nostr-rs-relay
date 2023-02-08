@@ -64,6 +64,8 @@ pub enum Error {
     DelegationParseError,
     #[error("Event builder error")]
     EventError(nostr::event::builder::Error),
+    #[error("Nostr key error")]
+    NostrKeyError(nostr::key::Error),
     //#[error("Request error")]
     // ReqError(minreq::Error),
     #[error("Unknown/Undocumented")]
@@ -140,6 +142,14 @@ impl From<nostr::event::builder::Error> for Error {
     fn from(r: nostr::event::builder::Error) -> Self {
         Error::EventError(r)
     }
+}
+
+impl From<nostr::key::Error> for Error {
+    /// Wrap nostr key error
+    fn from (r: nostr::key::Error) -> Self {
+        Error::NostrKeyError(r)
+    }
+
 }
 
 /*
