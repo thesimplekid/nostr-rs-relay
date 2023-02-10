@@ -166,7 +166,7 @@ async fn handle_web_request(
                     if mt_str.contains("application/nostr+json") {
                         // build a relay info response
                         debug!("Responding to server info request");
-                        let rinfo = RelayInfo::from(settings.info);
+                        let rinfo = RelayInfo::new(settings.info, settings.pay_to_relay);
                         let b = Body::from(serde_json::to_string_pretty(&rinfo).unwrap());
                         return Ok(Response::builder()
                             .status(200)
