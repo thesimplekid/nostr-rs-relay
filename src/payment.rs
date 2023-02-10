@@ -23,6 +23,7 @@ pub struct Payment {
     nostr_keys: Keys,
 }
 
+/// Info LNBits expects in create invoice request
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LNBitsCreateInvoice {
     out: bool,
@@ -34,6 +35,18 @@ pub struct LNBitsCreateInvoice {
     expiry: u64,
 }
 
+/// Invoice response for LN bits
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LNBitsCreateInvoiceResponse {
+    payment_hash: String,
+    payment_request: String,
+    checking_id: String,
+    lnurl_response: Option<String>,
+}
+
+/// LNBits call back response
+/// Used when an invoice is paid
+/// lnbits to post the status change to relay
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LNBitsCallback {
     pub checking_id: String,
@@ -49,6 +62,7 @@ pub struct LNBitsCallback {
     pub webhook_status: Option<String>,
 }
 
+/// Possible states of an invoice
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "status")]
 pub enum InvoiceStatus {
@@ -67,6 +81,7 @@ impl ToString for InvoiceStatus {
     }
 }
 
+/// Invoice information that is stored
 #[derive(Debug, Clone)]
 pub struct InvoiceInfo {
     pub pubkey: String,
@@ -78,27 +93,6 @@ pub struct InvoiceInfo {
     pub confirmed_at: Option<u64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetPaymentResponse {
-    payment_hash: String,
-    expires_at: u64,
-    bolt11: String,
-    payment_secret: String,
-}
-
-/// Invoice response for LN bits
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LNBitsCreateInvoiceResponse {
-    payment_hash: String,
-    payment_request: String,
-    checking_id: String,
-    lnurl_response: Option<String>,
-}
-
-pub enum PaymentMessage {
-    Event(Event),
-}
-
 impl Payment {
     pub fn new(
         repo: Arc<dyn NostrRepo>,
@@ -108,8 +102,8 @@ impl Payment {
     ) -> Result<Self> {
         info!("Create payment handler");
 
+        // Create nostr key from sk string
         let nostr_keys = Keys::from_sk_str(&settings.pay_to_relay.secret_key)?;
-        // let nostr_keys = Keys::generate();
 
         Ok(Payment {
             repo,
@@ -152,19 +146,19 @@ impl Payment {
         Ok(())
     }
 
+    /// Sends Nostr DM to pubkey that requested invoice
+    /// Two events the terms followed by the bolt11 invoice
     pub async fn send_admission_message(
         &mut self,
         pubkey: &str,
         invoice_info: InvoiceInfo,
     ) -> Result<()> {
-        // Create lighting address
-        // Checks that node url is set other wise returns error
-        // REVIEW: should maybe check this in config
+        // Create Nostr key from pk
         let key = Keys::from_pk_str(pubkey)?;
 
         let pubkey = key.public_key();
 
-        // Publish dm with terms of service and invoice
+        // Event DM with terms of service
         let message_event: NostrEvent = EventBuilder::new_encrypted_direct_msg(
             &self.nostr_keys,
             pubkey,
@@ -172,7 +166,7 @@ impl Payment {
         )?
         .to_event(&self.nostr_keys)?;
 
-        // Event with invoice
+        // Event DM with invoice
         let invoice_event: NostrEvent = EventBuilder::new_encrypted_direct_msg(
             &self.nostr_keys,
             pubkey,
@@ -180,11 +174,11 @@ impl Payment {
         )?
         .to_event(&self.nostr_keys)?;
 
-        // Persist event to DB
+        // Persist DM events to DB
         self.repo.write_event(&message_event.clone().into()).await?;
         self.repo.write_event(&invoice_event.clone().into()).await?;
 
-        // Broadcast event
+        // Broadcast DM events
         self.event_tx.send(message_event.clone().into()).ok();
         self.event_tx.send(invoice_event.clone().into()).ok();
 

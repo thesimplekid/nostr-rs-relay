@@ -823,7 +823,7 @@ impl NostrRepo for SqliteRepo {
         Ok(())
     }
 
-    /// Update invoice
+    /// Update invoice record
     async fn update_invoice(&self, payment_hash: &str, status: InvoiceStatus) -> Result<String> {
         let mut conn = self.write_pool.get()?;
         let payment_hash = payment_hash.to_owned();
@@ -832,6 +832,7 @@ impl NostrRepo for SqliteRepo {
             let pubkey: String;
             {
 
+                // Get required invoice info for given payment hash
                 let query = "SELECT pubkey, status, amount FROM invoice WHERE payment_hash=?1;";
                 let mut stmt = tx.prepare(query)?;
                 let (pub_key, prev_status, amount) = stmt.query_row(params![payment_hash], |r| {
@@ -844,22 +845,23 @@ impl NostrRepo for SqliteRepo {
 
                 })?;
 
-                // If the invoice is paid update the confirmed at timestamp
+                // If the invoice is paid update the confirmed_at timestamp
                 let query =  if status.eq(&InvoiceStatus::Paid) {
                     "UPDATE invoice SET status=?1, confirmed_at = strftime('%s', 'now') WHERE payment_hash=?2;"
                 } else {
                     "UPDATE invoice SET status=?1 WHERE payment_hash=?2;"
                 };
-
                 let mut stmt = tx.prepare(query)?;
                 stmt.execute(params![status.to_string(), payment_hash])?;
 
+                // Increase account balance by given invoice amount
                 if prev_status == "Unpaid" && status.eq(&InvoiceStatus::Paid) {
                     let query =
                             "UPDATE account SET balance = balance + ?1 WHERE pubkey = ?2;";
                     let mut stmt = tx.prepare(query)?;
                     stmt.execute(params![amount, pub_key])?;
                 }
+
                 pubkey = pub_key;
             }
 
@@ -871,6 +873,8 @@ impl NostrRepo for SqliteRepo {
         pub_key
     }
 
+    /// Get the most recent invoice for a given pubkey
+    /// invoice must be unpaid and not expired
     async fn get_unpaid_invoice(&self, pubkey: &Keys) -> Result<Option<InvoiceInfo>> {
         let mut conn = self.write_pool.get()?;
 

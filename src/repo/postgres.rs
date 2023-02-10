@@ -527,6 +527,7 @@ ON CONFLICT (id) DO NOTHING"#,
         Ok(success)
     }
 
+    /// Admit account
     async fn admit_account(&self, pub_key: &Keys) -> Result<()> {
         let pub_key = pub_key.public_key().to_string();
         sqlx::query("UPDATE account SET is_admitted = TRUE WHERE pubkey = $1")
@@ -536,6 +537,7 @@ ON CONFLICT (id) DO NOTHING"#,
         Ok(())
     }
 
+    /// Gets if the account is admitted and balance
     async fn get_account_balance(&self, pub_key: &Keys) -> Result<(bool, u64)> {
         let pub_key = pub_key.public_key().to_string();
         let query = r#"SELECT
@@ -554,6 +556,7 @@ ON CONFLICT (id) DO NOTHING"#,
         Ok((result.0, result.1 as u64))
     }
 
+    /// Update account balance
     async fn update_account_balance(
         &self,
         pub_key: &Keys,
@@ -580,6 +583,7 @@ ON CONFLICT (id) DO NOTHING"#,
         Ok(())
     }
 
+    /// Create invoice record
     async fn create_invoice_record(&self, pub_key: &Keys, invoice_info: InvoiceInfo) -> Result<()> {
         let pub_key = pub_key.public_key().to_string();
         let mut tx = self.conn.begin().await?;
@@ -602,6 +606,7 @@ ON CONFLICT (id) DO NOTHING"#,
         Ok(())
     }
 
+    /// Update invoice record
     async fn update_invoice(&self, payment_hash: &str, status: InvoiceStatus) -> Result<String> {
         debug!("Payment Hash: {}", payment_hash);
         let query = "SELECT pubkey, status, amount FROM invoice WHERE payment_hash=$1;";
@@ -636,6 +641,8 @@ ON CONFLICT (id) DO NOTHING"#,
         Ok(pubkey)
     }
 
+    /// Get the most recent invoice for a given pubkey
+    /// invoice must be unpaid and not expired
     async fn get_unpaid_invoice(&self, pubkey: &Keys) -> Result<Option<InvoiceInfo>> {
         let query = r#"
 SELECT amount, payment_hash, description, invoice
