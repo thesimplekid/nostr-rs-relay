@@ -64,7 +64,7 @@ pub trait NostrRepo: Send + Sync {
     async fn create_account(&self, pubkey: &Keys) -> Result<bool>;
 
     /// Admit an account
-    async fn admit_account(&self, pubkey: &Keys) -> Result<()>;
+    async fn admit_account(&self, pubkey: &Keys, admission_cost: u64) -> Result<()>;
 
     /// Gets user balance if they are an admitted pubkey
     async fn get_account_balance(&self, pubkey: &Keys) -> Result<(bool, u64)>;

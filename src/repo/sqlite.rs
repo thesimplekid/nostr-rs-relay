@@ -736,16 +736,16 @@ impl NostrRepo for SqliteRepo {
     }
 
     /// Admit account
-    async fn admit_account(&self, pub_key: &Keys) -> Result<()> {
+    async fn admit_account(&self, pub_key: &Keys, admission_cost: u64) -> Result<()> {
         let pub_key = pub_key.public_key().to_string();
         let mut conn = self.write_pool.get()?;
         let pub_key = pub_key.to_owned();
         tokio::task::spawn_blocking(move || {
             let tx = conn.transaction()?;
             {
-                let query = "UPDATE account SET is_admitted = TRUE, tos_accepted_at =  strftime('%s','now') WHERE pubkey=?";
+                let query = "UPDATE account SET is_admitted = TRUE, tos_accepted_at =  strftime('%s','now'), balance = balance - ?1 WHERE pubkey=?2;";
                 let mut stmt = tx.prepare(query)?;
-                stmt.execute(params![pub_key])?;
+                stmt.execute(params![admission_cost, pub_key])?;
             }
             tx.commit()?;
             let ok: Result<()> = Ok(());
@@ -808,7 +808,6 @@ impl NostrRepo for SqliteRepo {
         let pub_key = pub_key.to_owned();
         let mut conn = self.write_pool.get()?;
         tokio::task::spawn_blocking(move || {
-            debug!("CreareInvoice: {:?}", invoice_info);
             let tx = conn.transaction()?;
             {
                 let query = "INSERT INTO invoice (pubkey, payment_hash, amount, status, description, created_at, invoice) VALUES (?1, ?2, ?3, ?4, ?5, strftime('%s','now'), ?6);";
