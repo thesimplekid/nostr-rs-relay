@@ -4,7 +4,7 @@ use crate::payment::lnbits::LNBitsPaymentProcessor;
 use crate::repo::NostrRepo;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use async_trait::async_trait;
 use nostr::key::{FromPkStr, FromSkStr};
@@ -240,7 +240,8 @@ impl Payment {
         // I think it will continue to send DMs with the invoice
         // If client continues to try and write to the relay (will be same invoice)
         let key = Keys::from_pk_str(pubkey)?;
-        if !self.repo.create_account(&key).await? {
+        if self.repo.create_account(&key).await? {
+            debug!("Create user accont for {pubkey}");
             if let Ok(Some(invoice_info)) = self.repo.get_unpaid_invoice(&key).await {
                 return Ok(invoice_info);
             }

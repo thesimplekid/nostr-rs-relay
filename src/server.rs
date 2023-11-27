@@ -404,6 +404,10 @@ async fn handle_web_request(
                 match msg {
                     PaymentMessage::Invoice(m_pubkey, m_invoice_info) => {
                         if m_pubkey == pubkey.clone() {
+                            tracing::debug!(
+                                "Created invoiced from invoice endpoint for {}",
+                                m_pubkey
+                            );
                             invoice_info = Some(m_invoice_info);
                             break;
                         }
